@@ -1,0 +1,39 @@
+name: Günlük Veri Güncelleme
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # Her gün 06:00 UTC = 09:00 Europe/Istanbul
+  workflow_dispatch:    # manuel tetikleme seçeneği
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repo'yu klonla
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Python ortamını hazırla
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Bağımlılıkları yükle
+        run: pip install -r requirements.txt
+
+      - name: Veri çekimi
+        env:
+          EVDS_API_KEY: ${{ secrets.EVDS_API_KEY }}
+        run: python main.py
+
+      - name: Değişiklikleri commit et ve push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --local user.email "evds-bot@users.noreply.github.com"
+          git config --local user.name "evds-bot"
+          git add data/
+          # commit atma hatalarını sessizce geç
+          git commit -m "Güncel veriler eklendi $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "Değişiklik yok"
+          git push origin HEAD:main || echo "Push başarısız olabilir (örn: korumalı branch)"
