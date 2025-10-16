@@ -1,47 +1,55 @@
 #!/usr/bin/env python3
-# main.py - EVDS eski evdsAPI sürümüne uyumlu
+# main.py - EVDS yeni sürüme uyumlu
 
 import os
+import re
 import time
 import pandas as pd
 from datetime import datetime
-from evds import evdsAPI  # 🔹 senin sürümde doğru kullanım
+from evds import evdsAPI
 
 # ---------- AYARLAR ----------
-API_KEY = os.getenv("EVDS_API_KEY")  # Ortam değişkeni olarak ayarla
+API_KEY = os.getenv("EVDS_API_KEY")
 DATA_DIR = "data"
 START_DATE = "01-01-2000"
 END_DATE = datetime.now().strftime("%d-%m-%Y")
-SLEEP_BETWEEN_SERIES = 0.6  # rate-limit
+SLEEP_BETWEEN_SERIES = 0.6
 # -----------------------------
 
 if not API_KEY:
     raise SystemExit("❌ EVDS_API_KEY bulunamadı. Ortam değişkeni olarak tanımla.")
 
 os.makedirs(DATA_DIR, exist_ok=True)
-evds = evdsAPI(API_KEY)  # 🔹 doğru sınıf kullanımı
+evds = evdsAPI(API_KEY)
 
 # ---------- FONKSİYONLAR ----------
 
-def safe_get_categories():
+def safe_get_main_categories():
     try:
-        return evds.get_categories()
+        return evds.main_categories
     except Exception as e:
-        print(f"⚠️ get_categories hata: {e}")
+        print(f"⚠️ main_categories hata: {e}")
         return None
 
-def safe_get_series_for_category(cat_id):
+def safe_get_sub_categories(cat_id):
     try:
-        return evds.get_series(cat_id)
+        return evds.get_sub_categories(cat_id)
     except Exception as e:
-        print(f"  ⚠️ get_series hata (kategori {cat_id}): {e}")
+        print(f"⚠️ get_sub_categories hata (CATEGORY_ID={cat_id}): {e}")
+        return None
+
+def safe_get_series(datagroup_code):
+    try:
+        return evds.get_series(datagroup_code)
+    except Exception as e:
+        print(f"⚠️ get_series hata (DATAGROUP_CODE={datagroup_code}): {e}")
         return None
 
 def safe_get_data(code):
     try:
         return evds.get_data([code], startdate=START_DATE, enddate=END_DATE)
     except Exception as e:
-        print(f"  ⚠️ get_data hata ({code}): {e}")
+        print(f"⚠️ get_data hata ({code}): {e}")
         return None
 
 def normalize_df(df, code):
@@ -66,19 +74,29 @@ def normalize_df(df, code):
     df = df.rename(columns={series_col: code.replace(".", "_")})
     return df[["Tarih", code.replace(".", "_")]]
 
-def append_or_create_csv(code, new_df):
-    fname = os.path.join(DATA_DIR, f"{code}.csv")
-    if new_df is None or new_df.empty:
-        print(f"    ⛔ {code}: yeni veri yok.")
+def clean_filename(name):
+    """Dosya veya klasör isimlerinde sorun çıkaracak karakterleri temizler"""
+    return re.sub(r'[\\/*?:"<>|]', "", str(name))
+
+def append_or_create_csv(series_name, df, main_category, sub_category):
+    """CSV dosyasını klasör yapısına göre kaydeder veya günceller"""
+    main_dir = os.path.join(DATA_DIR, clean_filename(main_category))
+    sub_dir = os.path.join(main_dir, clean_filename(sub_category))
+    os.makedirs(sub_dir, exist_ok=True)
+
+    fname = os.path.join(sub_dir, f"{clean_filename(series_name)}.csv")
+
+    if df is None or df.empty:
+        print(f"    ⛔ {series_name}: yeni veri yok.")
         return
 
     if not os.path.exists(fname):
-        new_df.to_csv(fname, index=False, encoding="utf-8")
-        print(f"    ✅ Oluşturuldu: {fname} ({len(new_df)} satır)")
+        df.to_csv(fname, index=False, encoding="utf-8")
+        print(f"    ✅ Oluşturuldu: {fname} ({len(df)} satır)")
         return
 
     old = pd.read_csv(fname, parse_dates=["Tarih"], dayfirst=True)
-    combined = pd.concat([old, new_df], ignore_index=True)
+    combined = pd.concat([old, df], ignore_index=True)
     combined["Tarih"] = pd.to_datetime(combined["Tarih"], dayfirst=True, errors="coerce")
     combined = (
         combined.dropna(subset=["Tarih"])
@@ -90,32 +108,48 @@ def append_or_create_csv(code, new_df):
     print(f"    🔄 Güncellendi: {fname} (toplam {len(combined)} satır)")
 
 def fetch_all_series():
-    print("📡 Kategoriler alınıyor...")
-    cats = safe_get_categories()
-    if cats is None or cats.empty:
-        print("⚠️ Kategori alınamadı.")
+    print("📡 Ana kategoriler alınıyor...")
+    main_cats = safe_get_main_categories()
+    if main_cats is None or main_cats.empty:
+        print("⚠️ Ana kategori alınamadı.")
         return
 
-    for _, cat in cats.iterrows():
-        cat_id = cat.get("CATEGORYID")
-        cat_name = cat.get("CATEGORYNAME")
-        print(f"\n🔍 Kategori: {cat_name} (ID: {cat_id})")
+    for main_cat in main_cats.itertuples():
+        cat_id = main_cat.CATEGORY_ID
+        cat_name = getattr(main_cat, "TOPIC_TITLE_TR", "Bilinmiyor")
+        print(f"\n🔍 Ana Kategori: {cat_name} (ID: {cat_id})")
 
-        series_df = safe_get_series_for_category(cat_id)
-        if series_df is None or series_df.empty:
-            print("  (Bu kategoride seri yok veya hata oluştu.)")
+        sub_cats = safe_get_sub_categories(cat_id)
+        if sub_cats is None or sub_cats.empty:
+            print("  (Alt kategori yok veya hata oluştu.)")
             continue
 
-        for _, s in series_df.iterrows():
-            code = s.get("SERIECODE")
-            if not code:
+        for sub_cat in sub_cats.itertuples():
+            datagroup_code = sub_cat.DATAGROUP_CODE
+            sub_name = getattr(sub_cat, "DATAGROUP_NAME", "Bilinmiyor")
+            print(f"  ▪ Alt Kategori: {sub_name} (Code: {datagroup_code})")
+
+            series_df = safe_get_series(datagroup_code)
+            if series_df is None or series_df.empty:
+                print("    (Bu alt kategoride seri yok.)")
                 continue
 
-            print(f"  • Seri: {code}")
-            df_raw = safe_get_data(code)
-            df = normalize_df(df_raw, code)
-            append_or_create_csv(code, df)
-            time.sleep(SLEEP_BETWEEN_SERIES)
+            for s in series_df.itertuples():
+                serie_name = getattr(s, "SERIE_NAME", "Bilinmiyor")
+                code = getattr(s, "SERIE_CODE", None)
+                if not code:
+                    continue
+
+                print(f"    • Seri: {serie_name} ({code})")
+                df_raw = safe_get_data(code)
+                df = normalize_df(df_raw, code)
+                append_or_create_csv(
+                    series_name=serie_name,
+                    df=df,
+                    main_category=cat_name,
+                    sub_category=sub_name
+                )
+                time.sleep(SLEEP_BETWEEN_SERIES)
 
 # ---------- ANA PROGRAM ----------
 if __name__ == "__main__":
