@@ -14,7 +14,7 @@ API_KEY = os.getenv("EVDS_API_KEY")
 DATA_DIR = "data"
 SLEEP_BETWEEN_SERIES = 0.6
 UPDATE_MODE = "--update" in sys.argv
-UPDATE_DAYS = 7  # Güncelleme modunda son X gün
+UPDATE_DAYS = 3  # Güncelleme modunda son X gün
 # -----------------------------
 
 if not API_KEY:
@@ -176,3 +176,4 @@ if __name__ == "__main__":
     finally:
         elapsed = time.time() - start
         print(f"\n✨ İşlem tamamlandı. Süre: {elapsed:.0f} s")
+
