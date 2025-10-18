@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-# main.py - EVDS yeni sürüme uyumlu
+# main.py - EVDS yeni sürüme uyumlu, güncelleme modlu
 
 import os
 import re
+import sys
 import time
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from evds import evdsAPI
 
 # ---------- AYARLAR ----------
 API_KEY = os.getenv("EVDS_API_KEY")
 DATA_DIR = "data"
-START_DATE = "01-01-2000"
-END_DATE = datetime.now().strftime("%d-%m-%Y")
 SLEEP_BETWEEN_SERIES = 0.6
+UPDATE_MODE = "--update" in sys.argv
+UPDATE_DAYS = 7  # Güncelleme modunda son X gün
 # -----------------------------
 
 if not API_KEY:
@@ -47,7 +48,17 @@ def safe_get_series(datagroup_code):
 
 def safe_get_data(code):
     try:
-        return evds.get_data([code], startdate=START_DATE, enddate=END_DATE)
+        if UPDATE_MODE:
+            end = datetime.now()
+            start = end - timedelta(days=UPDATE_DAYS)
+            start_str = start.strftime("%d-%m-%Y")
+            end_str = end.strftime("%d-%m-%Y")
+            print(f"      ↪ Güncelleme aralığı: {start_str} → {end_str}")
+        else:
+            start_str = "01-01-2000"
+            end_str = datetime.now().strftime("%d-%m-%Y")
+
+        return evds.get_data([code], startdate=start_str, enddate=end_str)
     except Exception as e:
         print(f"⚠️ get_data hata ({code}): {e}")
         return None
@@ -107,8 +118,12 @@ def append_or_create_csv(series_name, df, main_category, sub_category):
     combined.to_csv(fname, index=False, encoding="utf-8")
     print(f"    🔄 Güncellendi: {fname} (toplam {len(combined)} satır)")
 
+# ---------- ANA PROGRAM ----------
+
 def fetch_all_series():
-    print("📡 Ana kategoriler alınıyor...")
+    mode = "GÜNCELLEME MODU" if UPDATE_MODE else "FULL MOD"
+    print(f"📡 {mode} başlatılıyor...")
+
     main_cats = safe_get_main_categories()
     if main_cats is None or main_cats.empty:
         print("⚠️ Ana kategori alınamadı.")
@@ -121,7 +136,6 @@ def fetch_all_series():
 
         sub_cats = safe_get_sub_categories(cat_id)
         if sub_cats is None or sub_cats.empty:
-            print("  (Alt kategori yok veya hata oluştu.)")
             continue
 
         for sub_cat in sub_cats.itertuples():
@@ -131,7 +145,6 @@ def fetch_all_series():
 
             series_df = safe_get_series(datagroup_code)
             if series_df is None or series_df.empty:
-                print("    (Bu alt kategoride seri yok.)")
                 continue
 
             for s in series_df.itertuples():
@@ -151,7 +164,7 @@ def fetch_all_series():
                 )
                 time.sleep(SLEEP_BETWEEN_SERIES)
 
-# ---------- ANA PROGRAM ----------
+# ---------- ANA ÇALIŞTIRMA ----------
 if __name__ == "__main__":
     start = time.time()
     try:
