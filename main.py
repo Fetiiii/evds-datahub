@@ -12,7 +12,7 @@ from evds import evdsAPI
 # ---------- AYARLAR ----------
 API_KEY = os.getenv("EVDS_API_KEY")
 DATA_DIR = "data"
-SLEEP_BETWEEN_SERIES = 0.6
+SLEEP_BETWEEN_SERIES = 1
 UPDATE_MODE = "--update" in sys.argv
 UPDATE_DAYS = 3  # Güncelleme modunda son X gün
 # -----------------------------
@@ -46,22 +46,40 @@ def safe_get_series(datagroup_code):
         print(f"⚠️ get_series hata (DATAGROUP_CODE={datagroup_code}): {e}")
         return None
 
-def safe_get_data(code):
-    try:
-        if UPDATE_MODE:
-            end = datetime.now()
-            start = end - timedelta(days=UPDATE_DAYS)
-            start_str = start.strftime("%d-%m-%Y")
-            end_str = end.strftime("%d-%m-%Y")
-            print(f"      ↪ Güncelleme aralığı: {start_str} → {end_str}")
-        else:
-            start_str = "01-01-2000"
-            end_str = datetime.now().strftime("%d-%m-%Y")
+import time
+import requests
 
-        return evds.get_data([code], startdate=start_str, enddate=end_str)
-    except Exception as e:
-        print(f"⚠️ get_data hata ({code}): {e}")
-        return None
+def safe_get_data(code, retries=3, delay=5):
+    """EVDS'ten veri çeker, bağlantı hatalarında tekrar dener."""
+    for attempt in range(retries):
+        try:
+            if UPDATE_MODE:
+                end = datetime.now()
+                start = end - timedelta(days=UPDATE_DAYS)
+                start_str = start.strftime("%d-%m-%Y")
+                end_str = end.strftime("%d-%m-%Y")
+                print(f"      ↪ Güncelleme aralığı: {start_str} → {end_str}")
+            else:
+                start_str = "01-01-2000"
+                end_str = datetime.now().strftime("%d-%m-%Y")
+
+            return evds.get_data([code], startdate=start_str, enddate=end_str)
+
+        except requests.exceptions.ConnectionError as e:
+            print(f"⚠️ Bağlantı hatası ({code}), {attempt+1}. deneme: {e}")
+            time.sleep(delay)
+
+        except Exception as e:
+            if "Too Many Requests" in str(e):
+                print("⚠️ API limitine ulaşıldı, 60 sn bekleniyor...")
+                time.sleep(60)
+                continue
+            print(f"⚠️ get_data hata ({code}): {e}")
+            break
+
+    print(f"❌ {code}: {retries} denemede veri alınamadı.")
+    return None
+
 
 def normalize_df(df, code):
     if df is None or df.empty:
@@ -176,4 +194,3 @@ if __name__ == "__main__":
     finally:
         elapsed = time.time() - start
         print(f"\n✨ İşlem tamamlandı. Süre: {elapsed:.0f} s")
-
