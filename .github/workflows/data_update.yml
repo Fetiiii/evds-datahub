@@ -1,8 +1,8 @@
 name: Günlük EVDS Veri Güncelleme
 
 on:
-  schedule:
-    - cron: "0 3 * * *"  # Her sabah 03:00'te otomatik çalışır
+  #schedule:
+   # - cron: "0 3 * * *"  # Her sabah 03:00'te otomatik çalışır
   workflow_dispatch:      # Manuel çalıştırma seçeneği (GitHub arayüzünden)
 
 jobs:
