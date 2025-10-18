@@ -1,18 +1,20 @@
 name: Günlük EVDS Veri Güncelleme
 
 on:
-  #schedule:
-   # - cron: "0 3 * * *"  # Her sabah 03:00'te otomatik çalışır
-  workflow_dispatch:      # Manuel çalıştırma seçeneği (GitHub arayüzünden)
+  # schedule:
+  #   - cron: "0 3 * * *"  # Her sabah 03:00'te otomatik çalışır (şimdilik devre dışı)
+  workflow_dispatch:      # Manuel olarak "Run workflow" butonuyla tetikleme
 
 jobs:
   update-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # Güvenlik için maksimum çalışma süresi (yaklaşık 6 saat)
+    timeout-minutes: 350  # Maksimum 6 saat güvenlik sınırı
 
     steps:
       - name: 📦 Repo'yu klonla
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # Manuel kimlik doğrulama yapacağız
 
       - name: 🐍 Python ortamını hazırla
         uses: actions/setup-python@v5
@@ -25,8 +27,7 @@ jobs:
       - name: 🔑 EVDS API anahtarını ayarla
         env:
           EVDS_API_KEY: ${{ secrets.EVDS_API_KEY }}
-        run: |
-          echo "EVDS API anahtarı yüklendi."
+        run: echo "EVDS API anahtarı yüklendi."
 
       - name: ⚙️ Güncelleme işlemini başlat
         env:
@@ -34,10 +35,12 @@ jobs:
         run: python main.py --update
 
       - name: 🧾 Değişiklikleri commit et ve gönder
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
-          # Commit sadece değişiklik varsa atılsın
+          # Sadece değişiklik varsa commit at
           git diff --quiet && git diff --staged --quiet || git commit -m "🔄 EVDS otomatik veri güncellemesi: $(date +'%Y-%m-%d %H:%M:%S')"
-          git push
+          git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }} HEAD:${{ github.ref }}
