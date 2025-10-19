@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-# main.py - EVDS yeni sürüme uyumlu, güncelleme modlu
+# main.py - EVDS yeni sürüme uyumlu, güncelleme + skip destekli + hata loglama
 
 import os
 import re
 import sys
 import time
+import requests
 import pandas as pd
 from datetime import datetime, timedelta
 from evds import evdsAPI
@@ -12,6 +13,7 @@ from evds import evdsAPI
 # ---------- AYARLAR ----------
 API_KEY = os.getenv("EVDS_API_KEY")
 DATA_DIR = "data"
+LOG_DIR = "logs"
 SLEEP_BETWEEN_SERIES = 1
 UPDATE_MODE = "--update" in sys.argv
 UPDATE_DAYS = 3  # Güncelleme modunda son X gün
@@ -21,9 +23,17 @@ if not API_KEY:
     raise SystemExit("❌ EVDS_API_KEY bulunamadı. Ortam değişkeni olarak tanımla.")
 
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
 evds = evdsAPI(API_KEY)
 
 # ---------- FONKSİYONLAR ----------
+
+def log_failed_series(code, serie_name, category, reason):
+    """Başarısız olan serileri logs/failed_series.txt dosyasına kaydeder."""
+    log_file = os.path.join(LOG_DIR, "failed_series.txt")
+    with open(log_file, "a", encoding="utf-8") as f:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        f.write(f"[{timestamp}] {category} | {serie_name} | {code} | {reason}\n")
 
 def safe_get_main_categories():
     try:
@@ -46,10 +56,7 @@ def safe_get_series(datagroup_code):
         print(f"⚠️ get_series hata (DATAGROUP_CODE={datagroup_code}): {e}")
         return None
 
-import time
-import requests
-
-def safe_get_data(code, retries=3, delay=5):
+def safe_get_data(code, serie_name=None, category=None, retries=3, delay=5):
     """EVDS'ten veri çeker, bağlantı hatalarında tekrar dener."""
     for attempt in range(retries):
         try:
@@ -78,8 +85,8 @@ def safe_get_data(code, retries=3, delay=5):
             break
 
     print(f"❌ {code}: {retries} denemede veri alınamadı.")
+    log_failed_series(code, serie_name or "Bilinmiyor", category or "Bilinmiyor", "ConnectionError veya boş veri")
     return None
-
 
 def normalize_df(df, code):
     if df is None or df.empty:
@@ -114,6 +121,14 @@ def append_or_create_csv(series_name, df, main_category, sub_category):
     os.makedirs(sub_dir, exist_ok=True)
 
     fname = os.path.join(sub_dir, f"{clean_filename(series_name)}.csv")
+    # Uzun yol desteği (Windows)
+    if os.name == "nt":
+        fname = "\\\\?\\" + os.path.abspath(fname)
+
+    # 🚀 Skip kontrolü: Dosya zaten varsa ve update modunda değilsek, atla
+    if os.path.exists(fname) and not UPDATE_MODE:
+        print(f"    ⏭️ {series_name}: zaten mevcut, atlanıyor.")
+        return
 
     if df is None or df.empty:
         print(f"    ⛔ {series_name}: yeni veri yok.")
@@ -172,7 +187,7 @@ def fetch_all_series():
                     continue
 
                 print(f"    • Seri: {serie_name} ({code})")
-                df_raw = safe_get_data(code)
+                df_raw = safe_get_data(code, serie_name=serie_name, category=sub_name)
                 df = normalize_df(df_raw, code)
                 append_or_create_csv(
                     series_name=serie_name,
