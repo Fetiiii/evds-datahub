@@ -1,2 +1,19 @@
-evds
-pandas
+# EVDS DataHub - Gereksinimler
+# Bu dosya hem lokal kullanım hem de GitHub Actions için optimize edilmiştir.
+
+# TCMB EVDS API erişimi
+evds>=1.0.5
+
+# Veri işleme
+pandas>=2.2.0
+
+# Tarih/saat, retry ve ağ yönetimi
+requests>=2.31.0
+python-dateutil>=2.8.2
+
+# Ortam değişkeni yönetimi (lokal için)
+python-dotenv>=1.0.1
+
+# Loglama / terminal çıktısı (isteğe bağlı)
+tqdm>=4.66.1
+colorama>=0.4.6
